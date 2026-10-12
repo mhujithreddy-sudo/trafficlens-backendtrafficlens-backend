@@ -1,275 +1,277 @@
-# 🔍 TrafficLens – Network Traffic Monitor (Backend)
+# 🔍 TrafficLens – Network Traffic Monitor (FastAPI Backend)
 
 > **Computer Networks Project-Based Learning (PBL)**  
-> **Course / Academic Level:** B.Tech Computer Science & Engineering  
-> **Backend Stack:** Python 3.13 • Flask • Flask-CORS • psutil • python-dotenv  
+> **Degree Program:** B.Tech Computer Science & Engineering  
+> **Academic Focus:** Real-time Bandwidth Telemetry • Socket Analysis • Interface Accounting • Device Discovery • Protocol & Service Classification • Flow Analytics • REST API Integration
 
 ---
 
-## 📖 1. Project Purpose
+## 📖 1. Project Overview
 
-**TrafficLens** is a lightweight, educational network traffic monitoring system developed as a B.Tech Computer Networks PBL project. 
+**TrafficLens** is a modular, production-quality network traffic monitoring backend built with **FastAPI**, **SQLAlchemy**, and **psutil** / **Scapy**. Designed for academic Computer Networks demonstrations and real-world system telemetry, it bridges low-level operating system network stacks directly to modern web dashboards (such as Next.js/React).
 
-It provides real-time system network telemetry and statistics to modern web frontends (e.g., Next.js deployed on Vercel), allowing users to:
-1. **Track Network Bandwidth Usage**: Measure real-time upload and download speeds and cumulative transferred data.
-2. **Interface Traffic Accounting**: View hardware network interfaces (Wi-Fi, Ethernet, Loopback) with active byte statistics.
-3. **Inspect Services & Protocols**: Identify active TCP and UDP sockets, protocol distribution, and associated processes (e.g., browsers, background services).
-4. **Bandwidth History**: Maintain an in-memory rolling time-series buffer of bandwidth metrics for live charting without requiring database overhead.
+### Key Features:
+- **Real-Time Bandwidth Metering:** Calculates instantaneous download and upload rates in Megabits per second (Mbps) using exact byte deltas over periodic ticks ($\Delta \text{Bytes} \times 8 / \Delta t$).
+- **Hardware Interface Accounting:** Measures physical byte counters on local adapters (Wi-Fi 802.11, Ethernet 802.3, Loopback).
+- **Device Discovery:** Discovers local interfaces and active LAN neighbors via ARP cache inspection and reverse DNS resolution.
+- **Service & Transport Analysis:** Inspects active TCP/UDP sockets, associates them with local host processes, and classifies standard services (HTTPS, HTTP, DNS, SSH, etc.).
+- **Packet Capture & Graceful Fallback:** Uses Scapy for packet metadata extraction (IPs, ports, protocols, packet sizes). If Npcap or elevated privileges are absent, falls back gracefully to socket-level telemetry without crashing.
+- **Privacy & Safety:** Strictly metadata-only capture. Never logs or stores raw packet payloads, credentials, or sensitive user contents.
+- **Historical Telemetry & Analytics:** Persists bandwidth, traffic, and device records in SQLite (or PostgreSQL) with rolling timeline bucketing (1h, 6h, 24h, 7d).
+- **Deterministic Alerts:** Flags bandwidth spikes and rate anomalies against baseline moving averages.
 
 ---
 
 ## 🏛️ 2. Architecture & Design
 
+```text
+                  +----------------------------------------------+
+                  |         TrafficLens Next.js Frontend         |
+                  |             (localhost:3000 / Vercel)        |
+                  +----------------------------------------------+
+                                         │
+                                         │ HTTP REST API (JSON) / CORS
+                                         ▼
+                  +----------------------------------------------+
+                  |         FastAPI REST API (Port 8000)         |
+                  |     - Automatic OpenAPI / Swagger Docs       |
+                  |     - Pydantic Input/Output Schemas          |
+                  |     - Global Error Handling & Logging        |
+                  +----------------------------------------------+
+                                         │
+             ┌───────────────────────────┼───────────────────────────┐
+             ▼                           ▼                           ▼
+  +─────────────────────+     +─────────────────────+     +─────────────────────+
+  |  BandwidthMonitor   |     |  DeviceDiscovery    |     |  PacketAnalyzer     |
+  |  (Background Thread)|     |  (ARP / Reverse DNS)|     |  (Scapy / Sockets)  |
+  |  psutil net_io      |     |  Local Interfaces   |     |  Protocol / Port    |
+  +─────────────────────+     +─────────────────────+     +─────────────────────+
+             │                           │                           │
+             └───────────────────────────┼───────────────────────────┘
+                                         ▼
+                  +----------------------------------------------+
+                  |             SQLAlchemy 2.0 ORM               |
+                  |      SQLite (Local) / PostgreSQL (Cloud)     |
+                  +----------------------------------------------+
 ```
-+--------------------------------------------------------------------------+
-|                     TrafficLens Architecture                             |
-+--------------------------------------------------------------------------+
-
-      [ Frontend Client ]  (Next.js / Vercel / HTML Dashboard)
-               |
-               |  HTTP GET / REST APIs (JSON)
-               v
-      [ Flask Web Server (Port 5000) ]
-        - Flask-CORS (Cross-Origin Resource Sharing)
-        - Clean JSON Error Handlers (404, 500, 400)
-               |
-      +--------+----------------------------+
-      |                                     |
-      v                                     v
- [ NetworkMonitor (Daemon Thread) ]    [ System Network Probes ]
-  - Periodic psutil.net_io_counters()   - psutil.net_if_addrs() (IP / MAC)
-  - Delta speed calculations (B/s)      - psutil.net_if_stats() (Status)
-  - In-memory deque (50-100 records)    - psutil.net_connections() (Sockets)
-                                        - Local ARP cache parser (Subnet)
-```
-
-### Key Architectural Decisions:
-- **No Database Overhead**: Designed cleanly for an academic PBL demonstration. The system tracks rolling metrics in an in-memory FIFO queue (`collections.deque`), avoiding heavy dependencies like PostgreSQL or Redis.
-- **Thread-Safe Sampling**: A lightweight background daemon thread (`NetworkMonitor`) samples network I/O counters once every second. When API consumers query `/api/network`, they receive instantaneous speeds without request latency.
-- **Dual Representation**: Numerical values (`bytes`, `speed` in B/s) are provided alongside formatted strings (e.g., `12.5 MB`, `1.20 MB/s`) for effortless frontend consumption.
 
 ---
 
-## 🛠️ 3. Technologies
+## 💻 3. Technology Stack
 
-| Technology | Version | Role in Project |
+| Component | Technology | Purpose |
 | :--- | :--- | :--- |
-| **Python** | 3.13+ | Core programming language |
-| **Flask** | 3.1.x | Lightweight WSGI web framework and REST API routing |
-| **Flask-CORS** | 6.0.x | Cross-Origin Resource Sharing handling for Vercel/localhost frontends |
-| **psutil** | 7.2.x | Cross-platform retrieval of system and network utilization |
-| **python-dotenv** | 1.2.x | Environment variable management via `.env` file |
+| **Backend Framework** | FastAPI (Python 3.12+ / 3.13) | Asynchronous REST API framework |
+| **ASGI Server** | Uvicorn | High-performance ASGI production server |
+| **System Probing** | psutil | Hardware interface telemetry, network I/O, process sockets |
+| **Packet Inspection** | Scapy | Transport/Network layer packet metadata extraction |
+| **ORM / Database** | SQLAlchemy | Relational persistence for bandwidth, traffic, devices, alerts |
+| **Default Storage** | SQLite (`trafficlens.db`) | Zero-config local embedded storage |
+| **Validation & Settings** | Pydantic & Pydantic-Settings | Request/response models and `.env` parsing |
+| **Testing** | pytest & httpx | Automated integration and unit test suite |
 
 ---
 
-## 📡 4. Backend REST APIs
+## 📁 4. Project Structure
 
-### 1. `GET /api/health`
-Checks server status and uptime.
-- **Response:**
-```json
-{
-  "status": "ok",
-  "service": "TrafficLens Backend",
-  "timestamp": "2026-10-11T13:26:26.470892+00:00",
-  "uptime_seconds": 2.71
-}
-```
-
-### 2. `GET /api/network`
-Retrieves cumulative data transfer and real-time upload/download speeds.
-- **Response:**
-```json
-{
-  "status": "success",
-  "timestamp": "2026-10-11T13:26:26.503548+00:00",
-  "download_bytes": 553079545,
-  "upload_bytes": 214790463,
-  "total_bytes": 767870008,
-  "download_bytes_formatted": "527.46 MB",
-  "upload_bytes_formatted": "204.84 MB",
-  "total_bytes_formatted": "732.30 MB",
-  "download_speed": 1490.17,
-  "upload_speed": 1053.19,
-  "total_speed": 2543.36,
-  "download_speed_formatted": "1.46 KB/s",
-  "upload_speed_formatted": "1.03 KB/s",
-  "total_speed_formatted": "2.48 KB/s",
-  "packets_sent": 136193,
-  "packets_recv": 147692
-}
-```
-
-### 3. `GET /api/devices`
-Lists detected network interfaces and local subnet nodes.
-- **Response:**
-```json
-{
-  "status": "success",
-  "devices_count": 8,
-  "devices": [
-    {
-      "device_name": "Wi-Fi (Local Interface)",
-      "interface": "Wi-Fi",
-      "device_type": "interface",
-      "ip_address": "192.168.29.127",
-      "mac_address": "00-72-EE-DE-63-9A",
-      "status": "online",
-      "download_usage": 553079545,
-      "upload_usage": 214790463,
-      "total_usage": 767870008,
-      "download_usage_formatted": "527.46 MB",
-      "upload_usage_formatted": "204.84 MB",
-      "total_usage_formatted": "732.30 MB",
-      "speed_mbps": 240,
-      "is_local": true
-    }
-  ],
-  "limitation_note": "Per-device bandwidth accounting across external LAN nodes requires router/gateway SNMP monitoring or promiscuous packet capture. Real hardware traffic counters are provided for local system network interfaces."
-}
-```
-
-### 4. `GET /api/services`
-Inspects active TCP/UDP connections and groups them by application or protocol.
-- **Response:**
-```json
-{
-  "status": "success",
-  "total_connections": 113,
-  "services": [
-    {
-      "service": "brave.exe",
-      "protocol": "UDP",
-      "connection_count": 23,
-      "status": "ESTABLISHED",
-      "local_address": "192.168.29.127:61952",
-      "remote_address": "13 endpoints",
-      "sample_remote": "2606:4700::443"
-    }
-  ],
-  "connections": [
-    {
-      "service": "brave.exe",
-      "pid": 14520,
-      "protocol": "UDP",
-      "local_address": "192.168.29.127:61952",
-      "remote_address": "2606:4700::443",
-      "status": "ESTABLISHED"
-    }
-  ]
-}
-```
-
-### 5. `GET /api/history`
-Returns rolling in-memory bandwidth usage history for live chart plotting.
-- **Response:**
-```json
-{
-  "status": "success",
-  "records_count": 60,
-  "history": [
-    {
-      "timestamp": "2026-10-11T13:26:25.845382+00:00",
-      "time": "18:56:25",
-      "download": 1490.17,
-      "upload": 1053.19,
-      "total": 2543.36,
-      "download_formatted": "1.46 KB/s",
-      "upload_formatted": "1.03 KB/s",
-      "total_formatted": "2.48 KB/s",
-      "bytes_recv_total": 553070581,
-      "bytes_sent_total": 214790097
-    }
-  ]
-}
+```text
+backend/
+├── app/
+│   ├── __init__.py
+│   ├── main.py                     # FastAPI app, lifespan hooks, CORS & routes
+│   ├── api/
+│   │   ├── __init__.py
+│   │   ├── dependencies.py         # DB session dependencies
+│   │   └── routes/
+│   │       ├── health.py           # GET /api/health
+│   │       ├── network.py          # GET /api/network
+│   │       ├── bandwidth.py        # GET /api/bandwidth, /api/bandwidth/history
+│   │       ├── devices.py          # GET /api/devices, /api/devices/{id}
+│   │       ├── services.py         # GET /api/services
+│   │       ├── traffic.py          # GET /api/traffic, /api/traffic/summary
+│   │       ├── analytics.py        # GET /api/analytics/*
+│   │       ├── history.py          # GET /api/history/*
+│   │       ├── alerts.py           # GET /api/alerts
+│   │       └── settings.py         # GET/PUT /api/settings
+│   ├── core/
+│   │   ├── config.py               # Pydantic BaseSettings (.env loading)
+│   │   ├── database.py             # SQLAlchemy engine & sessionmaker
+│   │   └── logging_config.py       # Structured logging setup
+│   ├── models/
+│   │   ├── device.py               # Device SQLAlchemy model
+│   │   ├── traffic.py              # TrafficRecord SQLAlchemy model
+│   │   ├── bandwidth.py            # BandwidthRecord SQLAlchemy model
+│   │   ├── service.py              # ServiceRecord SQLAlchemy model
+│   │   └── alert.py                # Alert SQLAlchemy model
+│   ├── schemas/                    # Pydantic validation & response schemas
+│   │   ├── device.py
+│   │   ├── traffic.py
+│   │   ├── bandwidth.py
+│   │   ├── service.py
+│   │   ├── analytics.py
+│   │   └── settings.py
+│   ├── services/                   # Modular background worker services
+│   │   ├── bandwidth_monitor.py
+│   │   ├── network_monitor.py
+│   │   ├── device_discovery.py
+│   │   ├── packet_analyzer.py
+│   │   ├── service_analyzer.py
+│   │   ├── analytics_service.py
+│   │   └── history_service.py
+│   └── utils/
+│       ├── network_utils.py        # Byte formatters, IP helpers
+│       ├── protocol_utils.py       # Port & protocol classification
+│       └── system_utils.py         # OS & driver capability detection
+├── tests/                          # Automated test suite (19 tests)
+│   ├── conftest.py
+│   ├── test_health.py
+│   ├── test_network.py
+│   ├── test_bandwidth.py
+│   ├── test_devices.py
+│   ├── test_services.py
+│   ├── test_traffic.py
+│   ├── test_analytics.py
+│   └── test_settings.py
+├── .env.example
+├── .env
+├── .gitignore
+├── requirements.txt
+├── README.md
+└── run.py                          # Application entry point
 ```
 
 ---
 
-## 🚀 5. How to Run the Backend
+## 🚀 5. Installation & Local Setup
 
-### Prerequisites
-- Python 3.13 installed.
+### Step 1: Create Virtual Environment
+```powershell
+# Navigate to backend directory
+cd "C:\Users\M.Hujith Reddy\.gemini\antigravity\scratch\trafficlens\backend"
 
-### Setup Steps
-```bash
-# 1. Navigate to the backend directory
-cd backend
-
-# 2. Create Python virtual environment
+# Create virtual environment with Python 3.12+ or 3.13
 python -m venv venv
 
-# 3. Activate the virtual environment
-# Windows (PowerShell):
+# Activate virtual environment on Windows
 .\venv\Scripts\Activate.ps1
-# Windows (CMD):
-.\venv\Scripts\activate.bat
-# Linux / macOS:
-source venv/bin/activate
+```
 
-# 4. Install dependencies
+### Step 2: Install Dependencies
+```powershell
 pip install -r requirements.txt
-
-# 5. Start the Flask server
-python app.py
 ```
 
-The server will start at:
+### Step 3: Configure Environment Variables
+Copy `.env.example` to `.env`:
+```powershell
+cp .env.example .env
 ```
-http://127.0.0.1:5000
-```
-
-### Running Test Suites
-```bash
-# Automated endpoint and CORS verification
-python test_app.py
-
-# Live TCP server test
-python test_live_http.py
-```
-
----
-
-## 🔗 6. How Frontend Connects to Backend
-
-### Environment Configuration
-In your Next.js or React frontend project root, configure `.env.local`:
-
+Default configuration (`.env`):
 ```env
-# Local development
-NEXT_PUBLIC_API_URL=http://127.0.0.1:5000
+APP_NAME=TrafficLens
+APP_ENV=development
+DEBUG=true
 
-# When backend is deployed (e.g. Render, Railway, AWS):
-# NEXT_PUBLIC_API_URL=https://your-trafficlens-backend.onrender.com
+HOST=0.0.0.0
+PORT=8000
+
+DATABASE_URL=sqlite:///./trafficlens.db
+CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173
+
+MONITORING_MODE=real
+PACKET_CAPTURE_ENABLED=true
+SAMPLE_INTERVAL_SECONDS=1.0
+HISTORY_RETENTION_HOURS=24
+BANDWIDTH_ALERT_THRESHOLD_MBPS=50.0
+TRAFFIC_LEVEL_LOW_MBPS=5.0
+TRAFFIC_LEVEL_MEDIUM_MBPS=25.0
 ```
 
-### TypeScript / JavaScript Integration
-Use the provided `frontend_integration/api.ts` client:
-```typescript
-import { api } from '@/lib/api';
-
-// Fetch live bandwidth stats
-const stats = await api.getNetwork();
-console.log(`Current download speed: ${stats.download_speed_formatted}`);
-
-// Fetch active services
-const services = await api.getServices();
-
-// Fetch bandwidth history for charts
-const history = await api.getHistory();
+### Step 4: Run the Server
+```powershell
+python run.py
+# or:
+uvicorn app.main:app --reload --port 8000
 ```
+> Server will start listening at: `http://localhost:8000`
 
 ---
 
-## ⚠️ 7. Computer Networks PBL Scope & Limitations
+## 📡 6. REST API Endpoints Contract
 
-1. **Host-Level Interface Measurement vs. LAN-Wide Accounting**:
-   - `psutil` reads network I/O counters directly from the operating system's network adapter drivers (`psutil.net_io_counters(pernic=True)`).
-   - This provides **100% authentic byte counters** for local machine interfaces (Wi-Fi, Ethernet).
-   - Measuring traffic transferred between *other third-party devices on the same Wi-Fi router* is not physically possible from a single non-promiscuous endpoint without managed router access, SNMP traps, or ARP spoofing.
-   - For educational integrity, TrafficLens clearly identifies local interface hardware statistics and flags detected LAN nodes as requiring router-level packet capture.
-2. **Process Access Permissions**:
-   - Active TCP/UDP connections for standard user processes are mapped accurately to process names.
-   - For privileged system/kernel sockets where standard user permissions restrict process inspection, TrafficLens falls back gracefully to standard port mapping (e.g., Port 443 → HTTPS, Port 53 → DNS).
-3. **No Database Requirement**:
-   - The system intentionally keeps traffic history in an in-memory rolling buffer (last 60–100 seconds) to demonstrate real-time data streaming without persistent storage complexity.
+All endpoints return structured JSON with standard HTTP status codes:
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/health` | Service vitality, database connectivity, monitoring status |
+| `GET` | `/api/network` | Host adapters, local IP, gateway, cumulative I/O counters |
+| `GET` | `/api/bandwidth` | Instantaneous transfer speeds (`download_mbps`, `upload_mbps`) |
+| `GET` | `/api/bandwidth/history` | Historical bandwidth measurements (`hours`, `limit` params) |
+| `GET` | `/api/devices` | Discovered network adapters and observable LAN neighbors |
+| `GET` | `/api/devices/{id}` | Specific device details, byte totals, and recent traffic flows |
+| `GET` | `/api/devices/{id}/traffic`| Recent traffic flows for a device |
+| `GET` | `/api/services` | Active transport sockets, process mapping, and services |
+| `GET` | `/api/traffic` | Recent packet flow records (`protocol`, `limit`, `source_ip`) |
+| `GET` | `/api/traffic/summary` | Protocol distribution (TCP/UDP/ICMP) & top communicators |
+| `GET` | `/api/analytics/overview` | Dashboard telemetry, active device counts, traffic levels |
+| `GET` | `/api/analytics/top-devices` | Devices ranked by total traffic consumed |
+| `GET` | `/api/analytics/top-services`| Services ranked by traffic share with exact percentages |
+| `GET` | `/api/analytics/timeline` | Time-series chart points (`range=1h,6h,24h,7d`) |
+| `GET` | `/api/alerts` | Network anomaly alerts (traffic spikes, bandwidth threshold) |
+| `GET` | `/api/history/traffic` | Historical traffic records with date filters |
+| `GET` | `/api/history/bandwidth` | Historical bandwidth records |
+| `GET` | `/api/history/devices` | Historical device observations |
+| `GET` | `/api/history` | Rolling bandwidth series (Next.js frontend compatible) |
+| `GET` | `/api/settings` | Current runtime monitoring configuration |
+| `PUT` | `/api/settings` | Update runtime alert thresholds and sample intervals |
+
+Interactive Swagger documentation is available at:
+`http://localhost:8000/docs`
+Raw OpenAPI schema is available at:
+`http://localhost:8000/openapi.json`
+
+---
+
+## 🧪 7. Running Automated Tests
+
+Run the full pytest suite:
+```powershell
+pytest tests -v
+```
+All 19 test cases verify:
+- Health and database connection checks
+- Network adapter statistics
+- Bandwidth rate calculation and Mbps conversion
+- Device discovery and 404 error handling
+- Service and socket inspection
+- Traffic summary and protocol distribution
+- Analytics overview and top consumers ranking
+- Dynamic settings updates and alert queries
+
+---
+
+## 🛡️ 8. Windows & Packet Capture Notes
+
+1. **Npcap Requirement:**
+   - Raw packet capture via Scapy on Windows requires the free [Npcap driver](https://npcap.com/) installed with "WinPcap API-compatible Mode" enabled.
+2. **Graceful Fallback:**
+   - If Npcap or elevated Administrator privileges are not available, **TrafficLens does NOT crash**.
+   - It gracefully falls back to system connection socket inspection (`psutil.net_connections`) and physical interface accounting (`psutil.net_io_counters`), clearly reporting `"packet_capture_available": false` in `/api/traffic/summary` while continuing to stream live data.
+3. **No Fake Data Guarantee:**
+   - When packet capture is in fallback mode, zero fake packets are generated. Real TCP/UDP sockets currently open on the operating system are observed.
+
+---
+
+## 🔌 9. Connecting to the Next.js Frontend
+
+To connect your existing Vercel Next.js frontend (`TrafficLens UI design`), set:
+
+In `frontend/.env.local`:
+```env
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+When hosting the backend in production (e.g. Render, Railway, AWS EC2):
+```env
+NEXT_PUBLIC_API_URL=https://<your-backend-domain>
+```
+All endpoints and response schemas maintain 100% backward compatibility with the existing frontend client!
